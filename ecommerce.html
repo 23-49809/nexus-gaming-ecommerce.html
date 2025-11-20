@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Gaming BGC - Smart Builder</title>
+    
+    <!-- Tailwind CSS & Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        
+        /* UI Accents */
+        .neon-text { text-shadow: 0 0 10px #8b5cf6, 0 0 20px #3b82f6; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        
+        /* Toast Notification Style */
+        .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 12px; }
+        .toast { transform: translateX(100%); transition: transform 0.3s ease-out; }
+        .toast.show { transform: translateX(0); }
+
+        /* Animations & Scroll */
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+
+        #map { height: 300px; width: 100%; border-radius: 0.5rem; z-index: 1; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen bg-[url('https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=2070&q=80')] bg-cover bg-fixed bg-no-repeat">
+
+    <!-- OVERLAY -->
+    <div class="fixed inset-0 bg-slate-900/95 z-0"></div>
+
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- NAV -->
+    <nav id="main-nav" class="hidden bg-slate-900/90 border-b border-slate-700 p-4 sticky top-0 z-50 shadow-2xl backdrop-blur">
+        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="switchView('home')">
+                <i class="fa-solid fa-microchip text-blue-500 text-3xl"></i>
+                <div><h1 class="font-bold text-2xl tracking-tighter text-white">NEXUS <span class="text-blue-500">BGC</span></h1></div>
+            </div>
+            
+            <div class="flex gap-4 items-center">
+                <button onclick="switchView('builder')" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-full font-bold shadow-lg shadow-purple-500/30 text-sm transition">
+                    <i class="fa-solid fa-screwdriver-wrench mr-2"></i> PC Builder
+                </button>
+                <div class="relative cursor-pointer hover:text-blue-400 group" onclick="switchView('checkout')">
+                    <i class="fa-solid fa-cart-shopping text-xl transition group-hover:scale-110"></i>
+                    <span id="cart-count" class="absolute -top-2 -right-2 bg-red-500 text-xs font-bold px-1.5 py-0.5 rounded-full">0</span>
+                </div>
+                <div id="user-status" class="flex items-center gap-2"></div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- APP CONTENT -->
+    <main id="app" class="flex-grow container mx-auto p-4 md:p-8 relative z-10 flex flex-col justify-center"></main>
+
+    <!-- SCRIPTS -->
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script>
+        // --- CONFIG & DATABASE ---
+        const BGC_COORDS = [14.5547, 121.0403];
+        let currentUser = null;
+        let cart = [];
+        let products = [];
+        let activeProductFilter = 'all';
+
+        const storeCategoryLabels = {
+            component: 'Core Component',
+            monitor: 'Monitor',
+            keyboard: 'Keyboard',
+            mouse: 'Mouse',
+            chair: 'Gaming Chair',
+            mousepad: 'Mouse Pad',
+            accessory: 'Gaming Accessory'
+        };
+
+        const shopFilters = [
+            { key: 'all', label: 'All Gear', icon: 'fa-layer-group' },
+            { key: 'monitor', label: 'Monitors', icon: 'fa-display' },
+            { key: 'keyboard', label: 'Keyboards', icon: 'fa-keyboard' },
+            { key: 'mouse', label: 'Mice', icon: 'fa-computer-mouse' },
+            { key: 'chair', label: 'Chairs', icon: 'fa-chair' },
+            { key: 'mousepad', label: 'Mouse Pads', icon: 'fa-table-cells-large' },
+            { key: 'accessory', label: 'Gaming Accessories', icon: 'fa-headset' },
+            { key: 'best', label: 'Best Sellers', icon: 'fa-fire' },
+            { key: 'new', label: "What's New", icon: 'fa-wand-magic-sparkles' }
+        ];
+
+            // Default Inventory (If LocalStorage is empty)
+
+
+
+
+        const defaultProducts = [
+            // Core Components
+            { id: 101, name: "Intel Core i9-13900K", cat: "cpu", storeCategory: "component", price: 35000, img: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=400&q=80", stock: 5, socket: "LGA1700", wattage: 125, bestSeller: true },
+            { id: 102, name: "AMD Ryzen 9 7950X", cat: "cpu", storeCategory: "component", price: 32000, img: "https://images.unsplash.com/photo-1612198527553-42b93156a5a6?auto=format&fit=crop&w=400&q=80", stock: 3, socket: "AM5", wattage: 170, isNew: true },
+            { id: 201, name: "ASUS ROG Maximus Z790", cat: "mobo", storeCategory: "component", price: 28000, img: "https://images.unsplash.com/photo-1517438322307-e67111335449?auto=format&fit=crop&w=400&q=80", stock: 4, socket: "LGA1700" },
+            { id: 202, name: "MSI MPG B650 Carbon", cat: "mobo", storeCategory: "component", price: 15000, img: "https://images.unsplash.com/photo-1587202372616-b43abea06c61?auto=format&fit=crop&w=400&q=80", stock: 6, socket: "AM5" },
+            { id: 301, name: "NVIDIA RTX 4090", cat: "gpu", storeCategory: "component", price: 115000, img: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=400&q=80", stock: 2, wattage: 450, bestSeller: true },
+            { id: 302, name: "NVIDIA RTX 3060", cat: "gpu", storeCategory: "component", price: 22000, img: "https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=400&q=80", stock: 10, wattage: 170 },
+            { id: 401, name: "Corsair Dominator 32GB", cat: "ram", storeCategory: "component", price: 8500, img: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=400&q=80", stock: 20, wattage: 10 },
+            { id: 501, name: "Seasonic 1000W Platinum", cat: "psu", storeCategory: "component", price: 12000, img: "https://images.unsplash.com/photo-1514809816815-013c9b5df3b0?auto=format&fit=crop&w=400&q=80", stock: 5, wattage: 1000 },
+            { id: 502, name: "Corsair 650W Bronze", cat: "psu", storeCategory: "component", price: 3500, img: "https://images.unsplash.com/photo-1477244075012-5cc28286e465?auto=format&fit=crop&w=400&q=80", stock: 15, wattage: 650 },
+            { id: 601, name: "Lian Li O11 Dynamic", cat: "case", storeCategory: "component", price: 8500, img: "https://images.unsplash.com/photo-1483478550801-ceba5fe50e8e?auto=format&fit=crop&w=400&q=80", stock: 8 },
+
+            // Peripherals & Gear
+            { id: 701, name: "Logitech G Pro Wireless", cat: "mouse", storeCategory: "mouse", price: 6500, img: "https://images.unsplash.com/photo-1545239351-1141bd82e8a6?auto=format&fit=crop&w=400&q=80", stock: 12, bestSeller: true },
+            { id: 702, name: "Razer DeathAdder V3 Pro", cat: "mouse", storeCategory: "mouse", price: 7200, img: "https://images.unsplash.com/photo-1475090169767-40ed8d18f67d?auto=format&fit=crop&w=400&q=80", stock: 9, isNew: true },
+            { id: 801, name: "Keychron Q1 Pro", cat: "keyboard", storeCategory: "keyboard", price: 9500, img: "https://images.unsplash.com/photo-1481277542470-605612bd2d61?auto=format&fit=crop&w=400&q=80", stock: 5 },
+            { id: 802, name: "ASUS ROG Azoth", cat: "keyboard", storeCategory: "keyboard", price: 13000, img: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=400&q=80", stock: 4, bestSeller: true },
+            { id: 901, name: 'ASUS ROG Swift 27" QHD', cat: "monitor", storeCategory: "monitor", price: 32000, img: "https://images.unsplash.com/photo-1517059224940-d4af9eec41e5?auto=format&fit=crop&w=400&q=80", stock: 6, bestSeller: true },
+            { id: 902, name: "MSI Optix MAG274QRF", cat: "monitor", storeCategory: "monitor", price: 26000, img: "https://images.unsplash.com/photo-1505740106531-4243f3831c78?auto=format&fit=crop&w=400&q=80", stock: 7 },
+            { id: 903, name: 'Samsung Odyssey G7 32"', cat: "monitor", storeCategory: "monitor", price: 34000, img: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=400&q=80", stock: 4, isNew: true },
+            { id: 1001, name: "Secretlab Titan Evo", cat: "chair", storeCategory: "chair", price: 24000, img: "https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&w=400&q=80", stock: 5, bestSeller: true },
+            { id: 1002, name: "Razer Enki Pro", cat: "chair", storeCategory: "chair", price: 28000, img: "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=400&q=80", stock: 3 },
+            { id: 1101, name: "SteelSeries QcK Prism XL", cat: "mousepad", storeCategory: "mousepad", price: 3500, img: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=400&q=80", stock: 10, bestSeller: true },
+            { id: 1102, name: "Glorious 3XL Stealth", cat: "mousepad", storeCategory: "mousepad", price: 2500, img: "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=400&q=80", stock: 8, isNew: true },
+            { id: 1201, name: "Elgato Stream Deck MK2", cat: "accessory", storeCategory: "accessory", price: 9000, img: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=400&q=80", stock: 6, bestSeller: true },
+            { id: 1202, name: "Razer Kraken V4 Pro", cat: "accessory", storeCategory: "accessory", price: 7800, img: "https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=400&q=80", stock: 9, isNew: true }
+        ];
+
+        let currentBuild = {};
+        let adminTab = 'dashboard';
+
+        const adminMetrics = { salesToday: 34, revenue: 452300, orders: 21, aov: 21538 };
+        const adminActivityLogs = [
+            { time: '09:12 AM', actor: 'System', detail: 'Order NGX-2025-0018 moved to In Transit' },
+            { time: '08:45 AM', actor: 'Ava Santos', detail: 'Created voucher GCASH-POWERUP' },
+            { time: '08:10 AM', actor: 'Liam Cruz', detail: 'Updated stock for ROG Maximus Z790' },
+            { time: '07:40 AM', actor: 'System', detail: 'Low inventory alert: Razer Enki Pro' }
+        ];
+        const paymentUsage = [
+            { label: 'E-Wallet', percent: 42, detail: 'GCash / PayMaya / GrabPay' },
+            { label: 'Online Banking', percent: 23, detail: 'Xendit gateway' },
+            { label: 'Cash on Delivery', percent: 18, detail: 'Zone A-C only' },
+            { label: 'PayPal', percent: 10, detail: 'International buyers' },
+            { label: 'Bank Transfer', percent: 7, detail: 'Manual verification' }
+        ];
+        const adminCategories = [
+            { name: 'Gaming Laptops', group: 'Systems', description: 'Portable rigs tuned for esports and AAA titles.' },
+            { name: 'Prebuilt Gaming PC', group: 'Systems', description: 'Ready-to-ship battlestations with warranty.' },
+            { name: 'Graphics Cards (NVIDIA)', group: 'Components', description: 'RTX GeForce lineup.' },
+            { name: 'Graphics Cards (AMD)', group: 'Components', description: 'Radeon RX family.' },
+            { name: 'Processors (Intel)', group: 'Components', description: 'Core-series CPUs.' },
+            { name: 'Processors (AMD)', group: 'Components', description: 'Ryzen-series CPUs.' },
+            { name: 'Motherboards', group: 'Components', description: 'ATX / mATX / ITX chipsets.' },
+            { name: 'RAM', group: 'Components', description: 'DDR4/DDR5 DIMMs.' },
+            { name: 'SSD / HDD', group: 'Storage', description: 'NVMe, SATA SSDs and HDDs.' },
+            { name: 'Power Supplies', group: 'Components', description: '80+ Bronze to Titanium PSUs.' },
+            { name: 'PC Cases', group: 'Components', description: 'Mid / full tower chassis.' },
+            { name: 'Cooling Systems (Air)', group: 'Cooling', description: 'Tower air coolers with RGB.' },
+            { name: 'Cooling Systems (Liquid)', group: 'Cooling', description: 'AIO and custom loop kits.' },
+            { name: 'Gaming Peripherals', group: 'Gear', description: 'Keyboard, mouse, headset, webcam bundles.' },
+            { name: 'Monitors', group: 'Displays', description: '144Hz - 360Hz displays.' },
+            { name: 'Gaming Chairs', group: 'Furniture', description: 'Ergonomic seats for marathon sessions.' },
+            { name: 'Networking', group: 'Infrastructure', description: 'Routers, mesh Wi-Fi, PCIe cards.' },
+            { name: 'Software', group: 'Digital', description: 'Windows, antivirus, game keys.' }
+        ];
+        const adminProductRecords = [
+            { name: 'Nexus Blade X17', category: 'Gaming Laptops', brand: 'Nexus', model: 'NBX17-4090', price: 189999, discount: 10000, stock: 12, sku: 'NBX174090-32', warranty: 24 },
+            { name: 'Helios MK-II', category: 'Prebuilt Gaming PC', brand: 'Helios Labs', model: 'HL-R9/7900XTX', price: 235000, discount: 15000, stock: 5, sku: 'HL-R9-7900XTX', warranty: 36 },
+            { name: 'NVIDIA RTX 4090 Phantom', category: 'Graphics Cards (NVIDIA)', brand: 'Nexus', model: 'NX-RTX4090-PH', price: 149999, discount: 5000, stock: 8, sku: 'NX4090PH24', warranty: 36 },
+            { name: 'Ryzen 9 7950X3D', category: 'Processors (AMD)', brand: 'AMD', model: '7950X3D', price: 39999, discount: 2000, stock: 18, sku: 'RYZ7950X3D', warranty: 36 },
+            { name: 'ROG Maximus Z790 Hero', category: 'Motherboards', brand: 'ASUS', model: 'Z790-Hero', price: 28999, discount: 1500, stock: 7, sku: 'ROGZ790HERO', warranty: 24 }
+        ];
+        const adminOrders = [
+            { number: 'NGX-2025-0012', customer: 'Chris Reyes', status: 'packing', payment: 'GCash', total: 165400, address: 'Uptown Bonifacio, BGC, Taguig', lat: 14.5536, lng: 121.045, method: 'E-Wallet', items: 3, invoice: true, refund: false },
+            { number: 'NGX-2025-0011', customer: 'Mika Torres', status: 'in transit', payment: 'COD', total: 88990, address: 'McKinley Hill, Taguig', lat: 14.535, lng: 121.051, method: 'Cash on Delivery', items: 2, invoice: true, refund: false },
+            { number: 'NGX-2025-0010', customer: 'Leo Manalang', status: 'pending', payment: 'PayPal', total: 249990, address: 'Ortigas Center, Pasig', lat: 14.587, lng: 121.061, method: 'PayPal', items: 1, invoice: true, refund: true },
+            { number: 'NGX-2025-0009', customer: 'Dana Uy', status: 'delivered', payment: 'Online Banking', total: 45990, address: 'New Manila, QC', lat: 14.622, lng: 121.03, method: 'Online Banking', items: 4, invoice: true, refund: false },
+            { number: 'NGX-2025-0008', customer: 'James Lim', status: 'cancelled', payment: 'Bank Transfer', total: 129990, address: 'Ayala Alabang, Muntinlupa', lat: 14.397, lng: 121.026, method: 'Bank Transfer', items: 2, invoice: false, refund: true }
+        ];
+        const paymentModes = [
+            { key: 'cod', name: 'Cash on Delivery', enabled: true, zone: 'Zone A-C only', limit: '&#8369;50,000 max', fee: '&#8369;150 handling', api: 'N/A' },
+            { key: 'ewallet', name: 'E-Wallet (GCash / PayMaya / GrabPay)', enabled: true, zone: 'Nationwide', limit: '&#8369;200,000 max', fee: '1.2% gateway fee', api: 'XENDIT_EWALLET_KEY' },
+            { key: 'paypal', name: 'PayPal', enabled: true, zone: 'Global', limit: '&#8369;250,000 max', fee: '4.4% + &#8369;15', api: 'PAYPAL_CLIENT/SECRET' },
+            { key: 'online', name: 'Online Banking (Gateway)', enabled: true, zone: 'Nationwide', limit: '&#8369;500,000 max', fee: '&#8369;25 flat', api: 'XENDIT_VA_KEY' },
+            { key: 'bank', name: 'Manual Bank Transfer', enabled: false, zone: 'Domestic', limit: '&#8369;750,000 max', fee: '0', api: 'Manual instructions' }
+        ];
+        const voucherList = [
+            { code: 'GCASH-POWERUP', type: 'Payment-specific', target: 'GCash', discount: '5% capped &#8369;1,500', zone: 'A-C', expiry: '2025-12-31' },
+            { code: 'GPU-MADNESS', type: 'Category', target: 'Graphics Cards', discount: '&#8369;3,000 off', zone: 'Nationwide', expiry: '2025-08-15' },
+            { code: 'SOFTWAREKIT', type: 'Product', target: 'Windows 11 Pro', discount: '&#8369;800 off', zone: 'Digital', expiry: '2026-01-30' }
+        ];
+        const shippingZones = [
+            { name: 'Zone A', range: '0-5 km', fee: '&#8369;120 base / &#8369;15 per km', cod: 'Allowed', note: 'Guaranteed same-day' },
+            { name: 'Zone B', range: '5-15 km', fee: '&#8369;200 base / &#8369;18 per km', cod: 'Allowed', note: '24-hour delivery' },
+            { name: 'Zone C', range: '15+ km', fee: '&#8369;350 base / &#8369;22 per km', cod: 'Limited', note: '48-hour delivery' },
+            { name: 'Zone D', range: 'Outside Metro Manila', fee: 'Custom quotation', cod: 'Not allowed', note: 'Partner courier network' }
+        ];
+        const customerProfiles = [
+            { name: 'Diana Cruz', email: 'diana@nexus.ph', preferred: 'GCash', status: 'Active', orders: 12, addresses: 2, device: 'iOS | Safari' },
+            { name: 'Miguel Ramos', email: 'miguel@arcade.gg', preferred: 'PayPal', status: 'Active', orders: 5, addresses: 1, device: 'Windows | Edge' },
+            { name: 'Sofia Bautista', email: 'sofia@designr.ph', preferred: 'Online Banking', status: 'Blocked', orders: 3, addresses: 2, device: 'Android | Chrome' },
+            { name: 'Aaron Go', email: 'aaron@streamcore.tv', preferred: 'COD', status: 'Active', orders: 9, addresses: 4, device: 'macOS | Chrome' }
+        ];
+        const staffMembers = [
+            { name: 'Ava Santos', role: 'Super Admin', scope: 'All modules', lastLogin: 'Today | 08:02 AM' },
+            { name: 'Liam Cruz', role: 'Inventory Lead', scope: 'Products, Orders, Shipping', lastLogin: 'Today | 07:55 AM' },
+            { name: 'Noah Villanueva', role: 'Support', scope: 'Customers, Vouchers', lastLogin: 'Yesterday' }
+        ];
+        const policySummary = 'Returns accepted within 7 days for defective units. Refunds issued after diagnostics. Digital keys are non-refundable once activated.';
+        const templateStatus = {
+            email: ['Order Confirmation', 'Shipping Update', 'Delivery Confirmation'],
+            sms: ['OTP Login', 'Delivery OTP', 'COD Reminder']
+        };
+        const adminTabs = [
+            { key: 'dashboard', label: 'Dashboard', icon: 'fa-chart-line' },
+            { key: 'categories', label: 'Categories', icon: 'fa-layer-group' },
+            { key: 'products', label: 'Products', icon: 'fa-boxes-stacked' },
+            { key: 'orders', label: 'Orders', icon: 'fa-receipt' },
+            { key: 'payments', label: 'Payments', icon: 'fa-credit-card' },
+            { key: 'vouchers', label: 'Vouchers', icon: 'fa-ticket' },
+            { key: 'shipping', label: 'Shipping', icon: 'fa-truck-fast' },
+            { key: 'customers', label: 'Customers', icon: 'fa-users' },
+            { key: 'settings', label: 'Admin Settings', icon: 'fa-gear' }
+        ];
+
+        function getStoreCategoryLabel(key) {
+            return storeCategoryLabels[key] || (key ? key.toUpperCase() : 'Gear');
+        }
+
+        function getFilterLabel(key) {
+            const matched = shopFilters.find(f => f.key === key);
+            return matched ? matched.label : 'All Gear';
+        }
+
+        const formatPeso = (value) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
+
+        // --- INITIALIZATION (Load from LocalStorage) ---
+        function initApp() {
+            // Load Products
+            const savedProducts = localStorage.getItem('nexusProducts');
+            products = savedProducts ? JSON.parse(savedProducts) : defaultProducts;
+
+            // Load Cart
+            const savedCart = localStorage.getItem('nexusCart');
+            if (savedCart) cart = JSON.parse(savedCart);
+
+            // Load User
+            const savedUser = localStorage.getItem('nexusUser');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                switchView('home');
+            } else {
+                switchView('login');
+            }
+            updateNav();
+        }
+
+        function saveData() {
+            localStorage.setItem('nexusProducts', JSON.stringify(products));
+            localStorage.setItem('nexusCart', JSON.stringify(cart));
+            localStorage.setItem('nexusUser', JSON.stringify(currentUser));
+            updateNav();
+        }
+
+        // --- UI COMPONENTS ---
+        
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const color = type === 'error' ? 'bg-red-600' : (type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600');
+            const icon = type === 'error' ? 'fa-circle-xmark' : (type === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-check');
+            
+            toast.className = `toast ${color} text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-3 min-w-[300px] border border-white/10`;
+            toast.innerHTML = `<i class="fa-solid ${icon} text-xl"></i> <span class="font-bold text-sm">${msg}</span>`;
+            
+            container.appendChild(toast);
+            
+            requestAnimationFrame(() => toast.classList.add('show'));
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function switchView(view) {
+            const app = document.getElementById('app');
+            const nav = document.getElementById('main-nav');
+            app.innerHTML = '';
+            window.scrollTo(0,0);
+
+            if (view === 'login') {
+                nav.classList.add('hidden');
+                renderLogin(app);
+            } else {
+                nav.classList.remove('hidden');
+                if (view === 'home') renderHome(app);
+                else if (view === 'builder') renderBuilder(app);
+                else if (view === 'checkout') renderCheckout(app);
+                else if (view === 'admin') renderAdmin(app);
+            }
+        }
+
+        // --- LOGIN VIEW ---
+        function renderLogin(container) {
+            container.classList.remove('md:p-8');
+            container.innerHTML = `
+                <div class="w-full max-w-md mx-auto bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-2xl fade-in">
+                    <div class="text-center mb-8">
+                        <h1 class="text-4xl font-bold neon-text mb-2">NEXUS</h1>
+                        <p class="text-blue-400 text-sm font-bold tracking-widest">SYSTEM ACCESS</p>
+                    </div>
+                    <div class="space-y-4">
+                        <input type="text" id="login-user" class="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-blue-500 outline-none transition" placeholder="Username (user/admin)">
+                        <input type="password" id="login-pass" class="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-blue-500 outline-none transition" placeholder="Password (123/admin)">
+                        <button onclick="performLogin()" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-3 rounded shadow-lg hover:scale-[1.02] transition transform">ENTER</button>
+                    </div>
+                    <div class="mt-4 text-center text-xs text-gray-500">
+                        <p>Try: <b class="text-gray-300">user / 123</b> or <b class="text-gray-300">admin / admin</b></p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function performLogin() {
+            const u = document.getElementById('login-user').value;
+            const p = document.getElementById('login-pass').value;
+
+            if (u === 'admin' && p === 'admin') {
+                currentUser = { role: 'admin', name: 'Admin' };
+                saveData();
+                switchView('admin');
+                showToast("Welcome, Administrator.");
+            } else if (u === 'user' && p === '123') {
+                currentUser = { role: 'customer', name: 'Gamer' };
+                saveData();
+                switchView('home');
+                showToast("Login Successful!");
+            } else {
+                showToast("Invalid Credentials", "error");
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            currentBuild = {};
+            localStorage.removeItem('nexusUser');
+            switchView('login');
+            showToast("Logged out successfully.");
+        }
+
+        function updateNav() {
+            const status = document.getElementById('user-status');
+            const count = document.getElementById('cart-count');
+            if(count) count.innerText = cart.length;
+            
+            if (currentUser && status) {
+                status.innerHTML = `
+                    <span class="text-sm text-gray-300 mr-2">Hello, ${currentUser.name}</span>
+                    ${currentUser.role === 'admin' ? `<button onclick="switchView('admin')" class="text-xs text-yellow-400 border border-yellow-400 px-2 py-1 rounded mr-2">ADMIN</button>` : ''}
+                    <button onclick="logout()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-right-from-bracket"></i></button>
+                `;
+            }
+        }
+
+        // --- SHOP & INVENTORY LOGIC ---
+
+        function addToCart(id) {
+            const product = products.find(p => p.id === id);
+            
+            // Stock Check
+            const inCartCount = cart.filter(i => i.id === id).length;
+            if (product.stock - inCartCount <= 0) {
+                showToast(`Sorry, ${product.name} is Out of Stock!`, "error");
+                return;
+            }
+
+            cart.push(product);
+            saveData();
+            showToast(`Added ${product.name}`);
+        }
+
+        function renderHome(container) {
+            container.classList.add('md:p-8');
+            let filtered = [...products];
+
+            if (activeProductFilter === 'best') {
+                filtered = products.filter(p => p.bestSeller);
+            } else if (activeProductFilter === 'new') {
+                filtered = products.filter(p => p.isNew);
+            } else if (activeProductFilter !== 'all') {
+                filtered = products.filter(p => (p.storeCategory || p.cat) === activeProductFilter);
+            }
+
+            const totalItems = filtered.length;
+            const totalInventory = products.length;
+
+            container.innerHTML = `
+                <section class="space-y-6 fade-in">
+                    <div class="glass-panel border border-slate-700 rounded-2xl p-6 shadow-2xl">
+                        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                            <div>
+                                <p class="text-xs uppercase tracking-[0.35em] text-blue-400 font-semibold mb-2">Nexus Gear Matrix</p>
+                                <h2 class="text-3xl md:text-4xl font-black text-white leading-tight">Curate your ${getFilterLabel(activeProductFilter)} loadout</h2>
+                                <p class="text-sm text-gray-400 mt-3 max-w-2xl">Tap a filter chip to zero-in on monitors, keyboards, mice, chairs, mouse pads, gaming accessories or our hottest drops.</p>
+                                <p class="text-xs text-gray-500 mt-3">Showing ${totalItems} / ${totalInventory} items</p>
+                            </div>
+                            <div class="min-w-[240px] bg-gradient-to-r from-blue-600/30 to-purple-600/30 border border-blue-500/30 rounded-2xl p-4 text-white">
+                                <p class="text-xs uppercase text-blue-200 mb-1">Current Filter</p>
+                                <p class="text-2xl font-bold">${getFilterLabel(activeProductFilter)}</p>
+                                <p class="text-xs text-gray-200 mt-2">Swipe through the chips to explore different loot tables.</p>
+                            </div>
+                        </div>
+                        <div class="mt-6 flex gap-3 overflow-x-auto pb-2">
+                            ${shopFilters.map(f => `
+                                                <button onclick="setProductFilter('${f.key}')" class="flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold transition ${activeProductFilter === f.key ? 'bg-blue-600 text-white border-blue-500 shadow-lg' : 'border-slate-600 text-gray-400 hover:text-white'}">
+                                    <i class="fa-solid ${f.icon} text-base"></i>
+                                    <span>${f.label}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        ${filtered.length ? filtered.map(p => {
+                            const label = getStoreCategoryLabel(p.storeCategory || p.cat);
+                            const inStock = p.stock > 0;
+                            return `
+                            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-lg hover:-translate-y-1 transition group relative">
+                                ${p.bestSeller ? '<span class="absolute top-3 left-3 bg-amber-400 text-xs font-black px-2 py-1 rounded-full text-slate-900">Best Seller</span>' : ''}
+                                ${p.isNew ? '<span class="absolute top-3 right-3 bg-sky-400 text-xs font-black px-2 py-1 rounded-full text-slate-900">New</span>' : ''}
+                                <div class="h-40 w-full overflow-hidden">
+                                    <img src="${p.img}" alt="${p.name}" class="w-full h-full object-cover transition duration-300 group-hover:scale-110">
+                                </div>
+                                <div class="p-4 space-y-3">
+                                    <p class="text-[11px] uppercase tracking-widest text-blue-300">${label}</p>
+                                    <h3 class="text-white font-bold text-lg leading-tight min-h-[48px]">${p.name}</h3>
+                                    <p class="text-xs text-gray-400">Stock: ${p.stock} | ${label}</p>
+                                    <div class="flex items-center justify-between pt-2">
+                                        <span class="text-blue-400 font-bold text-xl">&#8369;${p.price.toLocaleString()}</span>
+                                        <button ${inStock ? '' : 'disabled'} onclick="addToCart(${p.id})" class="px-4 py-2 rounded-full text-xs font-bold ${inStock ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'}">
+                                            ${inStock ? 'Add to cart' : 'Sold out'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        }).join('') : `
+                            <div class="col-span-full bg-slate-900/60 border border-slate-700 rounded-2xl p-12 text-center">
+                                <p class="text-xl font-bold text-white mb-2">No gear matches this filter yet.</p>
+                                <p class="text-sm text-gray-400 mb-4">Try a different category or check back later for fresh drops.</p>
+                                <button onclick="setProductFilter('all')" class="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-bold">Back to all gear</button>
+                            </div>
+                        `}
+                    </div>
+                </section>
+            `;
+        }
+
+        function setProductFilter(filterKey) {
+            activeProductFilter = filterKey;
+            renderHome(document.getElementById('app'));
+        }
+
+        // --- SMART PC BUILDER ---
+
+        function renderBuilder(container) {
+            const cats = ['cpu', 'mobo', 'gpu', 'ram', 'psu', 'case'];
+
+            // Compatibility Logic
+            let warnings = [];
+            let totalWattage = 0;
+            let socketFilter = null;
+
+            if (currentBuild.cpu) {
+                socketFilter = currentBuild.cpu.socket;
+                totalWattage += (currentBuild.cpu.wattage || 0);
+            }
+            if (currentBuild.gpu) totalWattage += (currentBuild.gpu.wattage || 0);
+            
+            // Check Socket
+            if (currentBuild.cpu && currentBuild.mobo) {
+                if (currentBuild.cpu.socket !== currentBuild.mobo.socket) {
+                    warnings.push(`[!] Incompatible! CPU is ${currentBuild.cpu.socket} but Mobo is ${currentBuild.mobo.socket}`);
+                }
+            }
+
+            // Check PSU
+            if (currentBuild.psu) {
+                if (currentBuild.psu.wattage < totalWattage) {
+                    warnings.push(`[!] DANGER: PSU (${currentBuild.psu.wattage}W) is too weak for this build (Approx ${totalWattage}W)`);
+                }
+            }
+
+            const selectedCount = cats.filter(cat => currentBuild[cat]).length;
+            const buildProgress = Math.round((selectedCount / cats.length) * 100);
+            const nextObjective = cats.find(cat => !currentBuild[cat]);
+            const questSubtitle = nextObjective ? `Next objective: slot a ${nextObjective.toUpperCase()}` : 'All modules equipped - lock in your build!';
+
+            container.innerHTML = `
+                <div class="flex flex-col lg:flex-row gap-6 h-[85vh] fade-in">
+                    <div class="lg:w-2/3 overflow-y-auto pb-20 pr-2">
+                        <div class="glass-panel border border-purple-500/40 rounded-2xl p-5 mb-6">
+                            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                                <div>
+                                    <p class="text-xs uppercase tracking-[0.35em] text-purple-200 mb-1">Loadout Questline</p>
+                                    <h3 class="text-2xl font-black text-white">Customization Stage ${selectedCount}/${cats.length}</h3>
+                                    <p class="text-sm text-gray-300 mt-2">${questSubtitle}</p>
+                                    <div class="h-3 bg-slate-900/60 rounded-full overflow-hidden mt-3">
+                                        <div class="h-full bg-gradient-to-r from-purple-500 to-blue-500" style="width:${buildProgress}%"></div>
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1">Progress: ${buildProgress}%</p>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3 text-center text-xs">
+                                    ${cats.map(cat => `
+                                        <div class="p-3 rounded-lg border ${currentBuild[cat] ? 'border-emerald-500 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-800 text-gray-500'}">
+                                            <p class="uppercase font-bold">${cat}</p>
+                                            <p class="mt-1">${currentBuild[cat] ? 'Equipped' : 'Empty'}</p>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-2xl font-bold text-white">Smart Configurator</h2>
+                            <button onclick="resetBuild()" class="text-xs text-red-400 underline">Reset Build</button>
+                        </div>
+                        
+                        ${cats.map(cat => {
+                            // Filter products for this category
+                            let parts = products.filter(p => p.cat === cat && p.stock > 0);
+                            // Apply Compatibility Filters
+                            if (cat === 'mobo' && socketFilter) {
+                                // Visual hint logic handled in mapping
+                            }
+
+                            return `
+                            <div class="mb-6">
+                                <h3 class="text-sm font-bold uppercase text-blue-400 mb-2 border-b border-slate-700 pb-1">${cat}</h3>
+                                <div class="flex gap-3 overflow-x-auto pb-2">
+                                    ${parts.map(p => {
+                                        let dimmed = false;
+                                        // Visual Dimming for incompatible parts
+                                        if (cat === 'mobo' && socketFilter && p.socket !== socketFilter) dimmed = true;
+                                        
+                                        const isSelected = currentBuild[cat]?.id === p.id;
+                                        return `
+                                        <div onclick="selectPart('${cat}', ${p.id})" class="min-w-[160px] bg-slate-800 p-3 rounded border cursor-pointer transition hover:scale-95 
+                                            ${isSelected ? 'border-purple-500 bg-purple-900/20' : (dimmed ? 'border-red-900 opacity-40' : 'border-slate-700')}">
+                                            <div class="h-20 w-full rounded-lg overflow-hidden bg-slate-900/60 mb-2">
+                                                <img src="${p.img}" alt="${p.name}" class="w-full h-full object-cover">
+                                            </div>
+                                            <div class="font-bold text-xs truncate text-white">${p.name}</div>
+                                            <div class="text-xs text-gray-400">&#8369;${p.price.toLocaleString()}</div>
+                                            ${p.socket ? `<div class="text-[10px] bg-slate-700 inline-block px-1 rounded mt-1 text-gray-300">${p.socket}</div>` : ''}
+                                            ${p.wattage ? `<div class="text-[10px] bg-slate-700 inline-block px-1 rounded mt-1 text-gray-300">${p.wattage}W</div>` : ''}
+                                        </div>
+                                    `}).join('')}
+                                </div>
+                            </div>
+                        `}).join('')}
+                    </div>
+
+                    <!-- STATUS PANEL -->
+                    <div class="lg:w-1/3 bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col h-fit">
+                        <h3 class="font-bold text-white mb-4">System Status</h3>
+                        
+                        <!-- Warnings -->
+                        ${warnings.length > 0 ? `<div class="bg-red-900/50 border border-red-500 p-3 rounded mb-4 text-xs text-red-200">${warnings.join('<br>')}</div>` : ''}
+
+                        <div class="space-y-2 mb-6 flex-grow">
+                            <div class="flex justify-between text-sm text-gray-400"><span>Est. Wattage</span><span class="${warnings.length > 0 ? 'text-red-400' : 'text-white'}">${totalWattage}W</span></div>
+                            <div class="flex justify-between text-sm text-gray-400"><span>Socket Type</span><span class="text-white">${socketFilter || 'Not selected'}</span></div>
+                        </div>
+
+                        <div class="mb-6">
+                            <h4 class="text-xs uppercase text-gray-400 mb-2">Quest Log</h4>
+                            <div class="space-y-1 text-xs">
+                                ${cats.map(cat => `
+                                    <div class="flex justify-between items-center ${currentBuild[cat] ? 'text-emerald-300' : 'text-gray-500'}">
+                                        <span><i class="fa-solid ${currentBuild[cat] ? 'fa-circle-check text-emerald-400' : 'fa-circle text-gray-600'} mr-2"></i>${cat.toUpperCase()}</span>
+                                        <span>${currentBuild[cat] ? 'Equipped' : 'Missing'}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <div class="border-t border-slate-600 pt-4 mt-auto">
+                                <div class="flex justify-between text-xl font-bold text-white mb-4">
+                                <span>Total</span>
+                                <span>&#8369;${Object.values(currentBuild).reduce((a,b) => a + (b ? b.price : 0), 0).toLocaleString()}</span>
+                            </div>
+                            <button onclick="addBuildToCart()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded disabled:bg-gray-600 disabled:cursor-not-allowed" ${warnings.length > 0 ? 'disabled' : ''}>
+                                ${warnings.length > 0 ? 'Fix Issues First' : 'Add Build to Cart'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function selectPart(cat, id) {
+            const part = products.find(p => p.id === id);
+            currentBuild[cat] = part;
+            renderBuilder(document.getElementById('app')); // Re-render for checks
+        }
+
+        function resetBuild() {
+            currentBuild = {};
+            renderBuilder(document.getElementById('app'));
+        }
+
+        function addBuildToCart() {
+            const parts = Object.values(currentBuild).filter(p => p !== null);
+            if (parts.length === 0) return showToast("Select parts first!", "warning");
+            
+            parts.forEach(p => cart.push(p));
+            saveData();
+            currentBuild = {};
+            showToast("Build added to Cart!");
+            updateNav();
+        }
+
+        // --- CHECKOUT (PICKUP vs DELIVERY) ---
+
+        let deliveryMode = 'delivery'; // 'delivery' or 'pickup'
+        let distance = 0;
+        let shippingFee = 0;
+        let paymentMethod = 'cod';
+
+        const paymentOptions = [
+            { key: 'cod', label: 'Cash on Delivery', desc: 'Pay when the courier arrives', icon: 'fa-box-open' },
+            { key: 'ewallet', label: 'E-Wallet', desc: 'GCash, Maya, ShopeePay', icon: 'fa-mobile-screen' },
+            { key: 'bank', label: 'Online Banking', desc: 'Secure bank transfer checkout', icon: 'fa-building-columns' }
+        ];
+
+        function renderCheckout(container) {
+            const subtotal = cart.reduce((s, i) => s + i.price, 0);
+            const eta = getEtaDetails();
+            
+            container.innerHTML = `
+                <div class="flex flex-col lg:flex-row gap-8 fade-in">
+                    <div class="lg:w-2/3 space-y-6">
+                        <!-- MODE SELECTOR -->
+                        <div class="bg-slate-800 p-1 rounded-lg inline-flex w-full mb-2">
+                            <button onclick="setDeliveryMode('delivery')" class="w-1/2 py-2 rounded-md text-sm font-bold transition ${deliveryMode === 'delivery' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'}">Delivery</button>
+                            <button onclick="setDeliveryMode('pickup')" class="w-1/2 py-2 rounded-md text-sm font-bold transition ${deliveryMode === 'pickup' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'}">Pick Up (BGC)</button>
+                        </div>
+
+                        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                            ${deliveryMode === 'delivery' ? `
+                                <h2 class="text-xl font-bold mb-2 text-white">Delivery Location</h2>
+                                <div id="map"></div>
+                                <p class="text-xs text-gray-500 mt-2">Click map to set location.</p>
+                            ` : `
+                                <h2 class="text-xl font-bold mb-2 text-white">Store Pickup</h2>
+                                <div class="bg-slate-700/50 p-4 rounded border border-dashed border-slate-500 text-center">
+                                    <i class="fa-solid fa-store text-4xl text-green-400 mb-2"></i>
+                                    <p class="font-bold text-white">Nexus BGC Headquarters</p>
+                                    <p class="text-sm text-gray-400">3rd Ave, Bonifacio Global City, Taguig</p>
+                                    <p class="text-xs text-blue-400 mt-2">Ready in 2 hours</p>
+                                </div>
+                            `}
+                        </div>
+
+                        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                            <h2 class="text-xl font-bold mb-4 text-white">Payment Method</h2>
+                            <div class="grid gap-3">
+                                ${paymentOptions.map(option => `
+                                    <div onclick="setPaymentMethod('${option.key}')" class="cursor-pointer flex items-center gap-4 border rounded-2xl p-4 transition ${paymentMethod === option.key ? 'border-blue-500 bg-blue-500/10 shadow-lg' : 'border-slate-700 hover:border-slate-500'}">
+                                        <div class="w-12 h-12 rounded-full bg-slate-900 text-blue-300 flex items-center justify-center text-xl">
+                                            <i class="fa-solid ${option.icon}"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <p class="font-bold text-white">${option.label}</p>
+                                            <p class="text-xs text-gray-400">${option.desc}</p>
+                                        </div>
+                                        ${paymentMethod === option.key ? '<i class="fa-solid fa-circle-check text-green-400 text-xl"></i>' : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lg:w-1/3">
+                        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 sticky top-24">
+                            <h2 class="font-bold text-white mb-4">Summary</h2>
+                            <div class="space-y-2 text-sm text-gray-400 mb-4 max-h-40 overflow-y-auto">
+                                ${cart.map(i => `<div class="flex justify-between"><span>${i.name}</span><span>&#8369;${i.price.toLocaleString()}</span></div>`).join('')}
+                            </div>
+                            <div class="border-t border-slate-600 pt-4 space-y-2">
+                                <div class="flex justify-between text-gray-300"><span>Subtotal</span><span>&#8369;${subtotal.toLocaleString()}</span></div>
+                                <div class="flex justify-between text-yellow-400"><span>Shipping</span><span id="fee-display">&#8369;${shippingFee.toLocaleString()}</span></div>
+                                <div class="flex justify-between text-xl font-bold text-white mt-2"><span>Total</span><span id="total-display">&#8369;${(subtotal + shippingFee).toLocaleString()}</span></div>
+                            </div>
+                            <div class="flex justify-between text-sm text-gray-400 mt-4"><span>Payment</span><span class="text-white font-semibold">${getPaymentLabel()}</span></div>
+                            <div class="bg-slate-900/60 border border-slate-700 rounded-xl p-4 mt-4 text-sm text-gray-300">
+                                <p id="eta-title" class="text-xs uppercase text-gray-400">${eta.title}</p>
+                                <p id="eta-window" class="text-white font-bold text-lg">${eta.window}</p>
+                                <p id="eta-detail" class="text-xs text-gray-400 mt-1">${eta.detail}</p>
+                            </div>
+                            <button onclick="checkout()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded mt-6 shadow-lg">
+                                CONFIRM ORDER
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if(deliveryMode === 'delivery') initMap(subtotal);
+        }
+
+        function setDeliveryMode(mode) {
+            deliveryMode = mode;
+            if (mode === 'pickup') {
+                shippingFee = 0;
+                distance = 0;
+            }
+            renderCheckout(document.getElementById('app'));
+        }
+
+        function setPaymentMethod(method) {
+            paymentMethod = method;
+            renderCheckout(document.getElementById('app'));
+        }
+
+        function getPaymentLabel(key = paymentMethod) {
+            const match = paymentOptions.find(p => p.key === key);
+            return match ? match.label : 'Payment';
+        }
+
+        function getEtaDetails() {
+            if (deliveryMode === 'pickup') {
+                return {
+                    title: 'Pickup ETA',
+                    window: 'Ready in 2 hours',
+                    detail: 'Fast-track release at Nexus HQ lobby.'
+                };
+            }
+            if (distance === 0) {
+                return {
+                    title: 'Delivery ETA',
+                    window: 'Set your drop point on the map',
+                    detail: 'ETA unlocks as soon as we know your location.'
+                };
+            }
+
+            let windowText = '';
+            let dayOffset = 0;
+            if (distance <= 5) {
+                windowText = 'Same-day drop (within 4 hours)';
+            } else if (distance <= 15) {
+                windowText = 'Arrives within 24 hours';
+                dayOffset = 1;
+            } else {
+                windowText = 'Arrives in 2-3 days';
+                dayOffset = 3;
+            }
+
+            const etaDate = new Date();
+            etaDate.setDate(etaDate.getDate() + dayOffset);
+            const detail = `Target: ${etaDate.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })} - ~${distance.toFixed(1)} km from HQ`;
+
+            return {
+                title: 'Delivery ETA',
+                window: windowText,
+                detail
+            };
+        }
+
+        function refreshEtaDisplay() {
+            const eta = getEtaDetails();
+            const titleEl = document.getElementById('eta-title');
+            const windowEl = document.getElementById('eta-window');
+            const detailEl = document.getElementById('eta-detail');
+            if (titleEl) titleEl.innerText = eta.title;
+            if (windowEl) windowEl.innerText = eta.window;
+            if (detailEl) detailEl.innerText = eta.detail;
+        }
+
+        function initMap(subtotal) {
+            setTimeout(() => {
+                const map = L.map('map').setView(BGC_COORDS, 11);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+                
+                const storeIcon = L.divIcon({ html: '<i class="fa-solid fa-store text-blue-500 text-3xl"></i>', className: 'bg-transparent' });
+                L.marker(BGC_COORDS, {icon: storeIcon}).addTo(map).bindPopup("Nexus HQ").openPopup();
+
+                map.on('click', (e) => {
+                    // Haversine Distance Calculation
+                    const lat1 = BGC_COORDS[0]; const lon1 = BGC_COORDS[1];
+                    const lat2 = e.latlng.lat; const lon2 = e.latlng.lng;
+                    const R = 6371; 
+                    const dLat = (lat2-lat1) * Math.PI/180;
+                    const dLon = (lon2-lon1) * Math.PI/180;
+                    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+                    distance = R * c;
+
+                    if (distance <= 5) shippingFee = 100;
+                    else if (distance <= 15) shippingFee = 250;
+                    else shippingFee = 450;
+
+                    L.marker([lat2, lon2]).addTo(map);
+                    document.getElementById('fee-display').innerText = `&#8369;${shippingFee.toLocaleString()}`;
+                    document.getElementById('total-display').innerText = `&#8369;${(subtotal + shippingFee).toLocaleString()}`;
+                    refreshEtaDisplay();
+                });
+            }, 100);
+        }
+
+        function checkout() {
+            if (cart.length === 0) return showToast("Cart is empty!", "error");
+            if (deliveryMode === 'delivery' && shippingFee === 0) return showToast("Please select location on map", "warning");
+
+            // DEDUCT STOCK (Inventory Logic)
+            cart.forEach(item => {
+                const productIndex = products.findIndex(p => p.id === item.id);
+                if (productIndex > -1) {
+                    products[productIndex].stock -= 1;
+                }
+            });
+
+            const paymentText = getPaymentLabel();
+            showToast(`Order booked via ${paymentText}!`);
+            cart = [];
+            paymentMethod = 'cod';
+            distance = 0;
+            shippingFee = 0;
+            saveData(); // Save updated stock and empty cart
+            setTimeout(() => switchView('home'), 2000);
+        }
+
+        // --- ADMIN DASHBOARD ---
+        function renderAdmin(container) {
+            container.innerHTML = `
+                <div class="fade-in space-y-6">
+                    <div class="flex flex-wrap gap-2">
+                        ${adminTabs.map(tab => `
+                            <button onclick="setAdminTab('${tab.key}')" class="px-4 py-2 rounded-full text-sm font-semibold border transition ${adminTab === tab.key ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/30' : 'border-slate-600 text-gray-400 hover:text-white'}">
+                                <i class="fa-solid ${tab.icon} mr-2"></i>${tab.label}
+                            </button>
+                        `).join('')}
+                    </div>
+                    ${renderAdminSection()}
+                </div>
+            `;
+        }
+
+        function setAdminTab(tab) {
+            adminTab = tab;
+            renderAdmin(document.getElementById('app'));
+        }
+
+        function renderAdminSection() {
+            switch (adminTab) {
+                case 'dashboard': return renderAdminDashboard();
+                case 'categories': return renderCategoryManager();
+                case 'products': return renderProductManager();
+                case 'orders': return renderOrderManager();
+                case 'payments': return renderPaymentPanel();
+                case 'vouchers': return renderVoucherEditor();
+                case 'shipping': return renderShippingSettings();
+                case 'customers': return renderCustomerManager();
+                case 'settings': return renderAdminSettings();
+                default: return '<p class="text-gray-400">Select a module to manage.</p>';
+            }
+        }
+
+        function renderAdminDashboard() {
+            const lowStock = products.filter(p => p.stock <= 3);
+            const bestSellers = products.filter(p => p.bestSeller).slice(0, 4);
+            return `
+                <section class="space-y-6">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        ${[
+                            { label: 'Sales Today', value: `${adminMetrics.salesToday} units`, icon: 'fa-bolt' },
+                            { label: 'Revenue', value: formatPeso(adminMetrics.revenue), icon: 'fa-coins' },
+                            { label: 'Orders', value: `${adminMetrics.orders}`, icon: 'fa-receipt' },
+                            { label: 'Avg Order Value', value: formatPeso(adminMetrics.aov), icon: 'fa-gauge-high' }
+                        ].map(card => `
+                            <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 flex items-center gap-4">
+                                <div class="w-12 h-12 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl">
+                                    <i class="fa-solid ${card.icon}"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs uppercase text-gray-400">${card.label}</p>
+                                    <p class="text-xl font-bold text-white">${card.value}</p>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="grid lg:grid-cols-3 gap-6">
+                        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                            <h3 class="text-white font-bold mb-3">Best-selling Gaming PCs</h3>
+                            <div class="space-y-3">
+                                ${bestSellers.length ? bestSellers.map(item => `
+                                    <div class="flex items-center gap-3">
+                                        <img src="${item.img}" class="w-12 h-12 rounded-lg object-cover border border-slate-700" alt="${item.name}">
+                                        <div class="flex-1">
+                                            <p class="text-white text-sm font-semibold">${item.name}</p>
+                                            <p class="text-xs text-gray-400">${item.cat}</p>
+                                        </div>
+                                        <span class="text-blue-400 text-xs font-bold uppercase">HOT</span>
+                                    </div>
+                                `).join('') : `<p class="text-gray-400 text-sm">No tagged best sellers yet.</p>`}
+                            </div>
+                        </div>
+                        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                            <h3 class="text-white font-bold mb-3">Inventory Alerts</h3>
+                            <div class="space-y-2 max-h-56 overflow-y-auto">
+                                ${lowStock.length ? lowStock.map(item => `
+                                    <div class="flex justify-between text-sm text-gray-200">
+                                        <span>${item.name}</span>
+                                        <span class="text-red-400 font-bold">Only ${item.stock} left</span>
+                                    </div>
+                                `).join('') : `<p class="text-gray-400 text-sm">No low stock warnings.</p>`}
+                            </div>
+                        </div>
+                        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                            <h3 class="text-white font-bold mb-3">Customer Activity</h3>
+                            <div class="space-y-3">
+                                ${adminActivityLogs.map(log => `
+                                    <div class="flex items-start gap-3">
+                                        <span class="text-xs text-blue-400 font-bold">${log.time}</span>
+                                        <div>
+                                            <p class="text-white text-sm">${log.detail}</p>
+                                            <p class="text-xs text-gray-500">by ${log.actor}</p>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <h3 class="text-white font-bold mb-4">Payment Method Usage</h3>
+                        <div class="space-y-4">
+                            ${paymentUsage.map(method => `
+                                <div>
+                                    <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                        <span>${method.label}</span>
+                                        <span>${method.percent}%</span>
+                                    </div>
+                                    <div class="h-2 bg-slate-900 rounded-full overflow-hidden">
+                                        <div class="h-full bg-gradient-to-r from-blue-500 to-purple-500" style="width:${method.percent}%"></div>
+                                    </div>
+                                    <p class="text-[11px] text-gray-500 mt-1">${method.detail}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderCategoryManager() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 class="text-white font-bold text-xl mb-1">Product Category Management</h3>
+                                <p class="text-xs text-gray-400">All gaming hardware, peripherals, networking, and software verticals.</p>
+                            </div>
+                            <button class="px-4 py-2 bg-blue-600 rounded-full text-sm font-semibold">+ New Category</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr><th class="py-2">Category</th><th class="py-2">Group</th><th class="py-2">Description</th></tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${adminCategories.map(cat => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${cat.name}</td>
+                                            <td class="py-3 text-xs text-blue-300">${cat.group}</td>
+                                            <td class="py-3 text-gray-400">${cat.description}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/40 border border-slate-700 rounded-2xl p-5 text-sm text-gray-300">
+                        <p class="font-semibold text-white mb-1">Tools</p>
+                        <p>Drag-and-drop ordering, nested parenting, icon picker, SEO metadata, and spec-template linkage per category.</p>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderProductManager() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-bold text-xl">Product Management (CRUD)</h3>
+                            <button class="px-4 py-2 rounded-full bg-blue-600 text-sm font-semibold">+ Create Product</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr>
+                                        <th class="py-2">Product</th><th class="py-2">Category</th><th class="py-2">Brand</th><th class="py-2">Model #</th>
+                                        <th class="py-2">Price</th><th class="py-2">Discount</th><th class="py-2">Stock</th><th class="py-2">SKU</th><th class="py-2">Warranty</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${adminProductRecords.map(item => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${item.name}</td>
+                                            <td class="py-3 text-xs text-blue-300">${item.category}</td>
+                                            <td class="py-3">${item.brand}</td>
+                                            <td class="py-3">${item.model}</td>
+                                            <td class="py-3">${formatPeso(item.price)}</td>
+                                            <td class="py-3 text-emerald-400">-${formatPeso(item.discount)}</td>
+                                            <td class="py-3 font-bold ${item.stock < 5 ? 'text-red-400' : 'text-emerald-400'}">${item.stock}</td>
+                                            <td class="py-3 text-xs">${item.sku}</td>
+                                            <td class="py-3 text-xs">${item.warranty} mos</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="grid lg:grid-cols-2 gap-4">
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-2xl p-5">
+                            <h4 class="text-white font-bold mb-2">Media + 3D flip workflow</h4>
+                            <ul class="text-sm text-gray-300 list-disc list-inside space-y-1">
+                                <li>Front/back image upload with drag-sort gallery.</li>
+                                <li>Optional video and 360° GLB/USDZ assets.</li>
+                                <li>3D flip designer: front = hero image + key specs; back = detailed specs + description.</li>
+                                <li>Live preview component ensures spec completeness before publishing.</li>
+                            </ul>
+                        </div>
+                        <div class="bg-slate-900/50 border border-slate-700 rounded-2xl p-5">
+                            <h4 class="text-white font-bold mb-2">Spec templates per category</h4>
+                            <div class="grid grid-cols-2 gap-3 text-xs text-gray-300">
+                                <div>
+                                    <p class="font-semibold text-blue-300 mb-1">Gaming Laptops</p>
+                                    <ul class="list-disc list-inside space-y-1">
+                                        <li>CPU brand/model + base/boost</li>
+                                        <li>GPU model + VRAM</li>
+                                        <li>RAM size/speed/DDR</li>
+                                        <li>Storage type/capacity</li>
+                                        <li>Screen size + refresh rate</li>
+                                        <li>Battery, ports, weight</li>
+                                        <li>Cooling + RGB support</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <p class="font-semibold text-blue-300 mb-1">GPUs, CPUs, Motherboards</p>
+                                    <ul class="list-disc list-inside space-y-1">
+                                        <li>GPU: CUDA/Stream cores, clocks, power, PSU, dimensions.</li>
+                                        <li>CPU: cores/threads, base & boost, socket, TDP, generation.</li>
+                                        <li>Motherboard: chipset, form factor, RAM slots, M.2 count, PCIe lanes.</li>
+                                        <li>Extensible templates for RAM, storage, cooling, peripherals, networking, software.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderOrderManager() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-bold text-xl">Order Management</h3>
+                            <div class="flex gap-2 text-xs flex-wrap">
+                                ${['pending', 'packing', 'in transit', 'delivered', 'cancelled'].map(status => `<span class="px-3 py-1 rounded-full bg-slate-900/70 text-gray-300 capitalize">${status}</span>`).join('')}
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr>
+                                        <th class="py-2">Order #</th><th class="py-2">Customer</th><th class="py-2">Status</th><th class="py-2">Payment</th>
+                                        <th class="py-2">Total</th><th class="py-2">Items</th><th class="py-2">Shipping</th><th class="py-2 text-center">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${adminOrders.map(order => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${order.number}</td>
+                                            <td class="py-3">${order.customer}</td>
+                                            <td class="py-3"><span class="px-2 py-1 rounded-full text-xs ${order.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300' : order.status === 'cancelled' ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}">${order.status}</span></td>
+                                            <td class="py-3 text-xs">${order.payment}</td>
+                                            <td class="py-3">${formatPeso(order.total)}</td>
+                                            <td class="py-3 text-center">${order.items}</td>
+                                            <td class="py-3 text-xs">${order.address}</td>
+                                            <td class="py-3 text-center space-x-1">
+                                                ${order.invoice ? `<button class="text-blue-400 text-xs underline">Invoice</button>` : ''}
+                                                ${order.refund ? `<button class="text-red-400 text-xs underline">Refund</button>` : ''}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3">Each order records customer info, payment method, product list, invoice availability, refund control, and shipping coordinates for the map pin.</p>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderPaymentPanel() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 class="text-white font-bold text-xl">Payment Method Control Panel</h3>
+                                <p class="text-xs text-gray-400">Enable/disable methods, apply zone limits, min/max, fees, and manage API keys.</p>
+                            </div>
+                            <button class="px-4 py-2 bg-blue-600 rounded-full text-sm font-semibold">View Logs</button>
+                        </div>
+                        <div class="grid lg:grid-cols-2 gap-4">
+                            ${paymentModes.map(method => `
+                                <div class="border border-slate-700 rounded-2xl p-4 bg-slate-900/40">
+                                    <div class="flex justify-between items-start">
+                                        <div>
+                                            <p class="text-white font-semibold">${method.name}</p>
+                                            <p class="text-xs text-gray-400">${method.zone}</p>
+                                        </div>
+                                        <span class="text-xs px-3 py-1 rounded-full ${method.enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}">${method.enabled ? 'Enabled' : 'Disabled'}</span>
+                                    </div>
+                                    <ul class="text-xs text-gray-300 mt-3 space-y-1">
+                                        <li>Limit: ${method.limit}</li>
+                                        <li>Fee: ${method.fee}</li>
+                                        <li>API: ${method.api}</li>
+                                    </ul>
+                                    <div class="flex gap-2 mt-4 text-xs">
+                                        <button class="px-3 py-1 rounded-full bg-blue-600/30 border border-blue-500 text-blue-100">Edit</button>
+                                        <button class="px-3 py-1 rounded-full border border-slate-600 text-gray-300">Toggle</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderVoucherEditor() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-bold text-xl">Voucher & Promo Editor</h3>
+                            <button class="px-4 py-2 rounded-full bg-blue-600 text-sm font-semibold">+ New Voucher</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr><th class="py-2">Code</th><th class="py-2">Type</th><th class="py-2">Target</th><th class="py-2">Discount</th><th class="py-2">Zones</th><th class="py-2">Expiry</th></tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${voucherList.map(voucher => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${voucher.code}</td>
+                                            <td class="py-3 text-xs text-blue-300">${voucher.type}</td>
+                                            <td class="py-3">${voucher.target}</td>
+                                            <td class="py-3 text-emerald-400">${voucher.discount}</td>
+                                            <td class="py-3 text-xs">${voucher.zone}</td>
+                                            <td class="py-3 text-xs">${voucher.expiry}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3">Supports category, product, payment-method, and zone filters with usage logging.</p>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderShippingSettings() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 class="text-white font-bold text-xl">Shipping Settings</h3>
+                                <p class="text-xs text-gray-400">Origin hub: Nexus HQ, Bonifacio Global City.</p>
+                            </div>
+                            <button class="px-4 py-2 rounded-full bg-blue-600 text-sm font-semibold">Sync Courier</button>
+                        </div>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            ${shippingZones.map(zone => `
+                                <div class="border border-slate-700 rounded-2xl p-4 bg-slate-900/40">
+                                    <div class="flex justify-between items-center">
+                                        <div>
+                                            <p class="text-white font-semibold">${zone.name}</p>
+                                            <p class="text-xs text-gray-400">${zone.range}</p>
+                                        </div>
+                                        <span class="text-xs ${zone.cod === 'Allowed' ? 'text-emerald-400' : zone.cod === 'Limited' ? 'text-yellow-400' : 'text-red-400'}">${zone.cod} COD</span>
+                                    </div>
+                                    <p class="text-sm text-blue-300 mt-2">${zone.fee}</p>
+                                    <p class="text-xs text-gray-400 mt-1">${zone.note}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3">Distance-based fee uses map pin coordinates (haversine) with per-zone minimums and COD availability toggles.</p>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderCustomerManager() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-bold text-xl">Customer Management</h3>
+                            <button class="px-4 py-2 rounded-full bg-blue-600 text-sm font-semibold">Export CSV</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr><th class="py-2">Customer</th><th class="py-2">Email</th><th class="py-2">Preferred Payment</th><th class="py-2">Orders</th><th class="py-2">Addresses</th><th class="py-2">Device</th><th class="py-2">Status</th></tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${customerProfiles.map(profile => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${profile.name}</td>
+                                            <td class="py-3">${profile.email}</td>
+                                            <td class="py-3 text-xs text-blue-300">${profile.preferred}</td>
+                                            <td class="py-3 text-center">${profile.orders}</td>
+                                            <td class="py-3 text-center">${profile.addresses}</td>
+                                            <td class="py-3 text-xs">${profile.device}</td>
+                                            <td class="py-3">
+                                                <span class="px-3 py-1 rounded-full text-xs ${profile.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}">${profile.status}</span>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3">Profiles capture order history, preferred payments, saved addresses, device fingerprints, and account status toggles.</p>
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderAdminSettings() {
+            return `
+                <section class="space-y-4">
+                    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-bold text-xl">Admin Settings</h3>
+                            <button class="px-4 py-2 rounded-full bg-blue-600 text-sm font-semibold">Invite Staff</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-gray-300">
+                                <thead class="text-xs uppercase text-gray-400 border-b border-slate-700">
+                                    <tr><th class="py-2">Staff</th><th class="py-2">Role</th><th class="py-2">Scope</th><th class="py-2">Last Login</th></tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${staffMembers.map(staff => `
+                                        <tr>
+                                            <td class="py-3 font-semibold text-white">${staff.name}</td>
+                                            <td class="py-3">${staff.role}</td>
+                                            <td class="py-3 text-xs text-blue-300">${staff.scope}</td>
+                                            <td class="py-3 text-xs text-gray-400">${staff.lastLogin}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/50 border border-slate-700 rounded-2xl p-5 text-sm text-gray-300">
+                        <h4 class="text-white font-bold mb-2">Return & Refund Policy</h4>
+                        <p class="mb-4">${policySummary}</p>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-xs uppercase text-gray-400">Email templates</p>
+                                <ul class="list-disc list-inside space-y-1">
+                                    ${templateStatus.email.map(item => `<li>${item}</li>`).join('')}
+                                </ul>
+                            </div>
+                            <div>
+                                <p class="text-xs uppercase text-gray-400">SMS / Notification templates</p>
+                                <ul class="list-disc list-inside space-y-1">
+                                    ${templateStatus.sms.map(item => `<li>${item}</li>`).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
+        function restock(id) {
+            const p = products.find(p => p.id === id);
+            p.stock += 5;
+            saveData();
+            renderAdmin(document.getElementById('app'));
+            showToast(`Restocked ${p.name}`);
+        }
+
+        // --- RUN APP ---
+        initApp();
+
+    </script>
+</body>
+</html>
+
